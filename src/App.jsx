@@ -1,131 +1,185 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect } from "react";
+import {
+  Authenticator,
+  Button,
+  Text,
+  TextField,
+  Heading,
+  Flex,
+  View,
+  Image,
+  Grid,
+  Divider,
+} from "@aws-amplify/ui-react";
+import { Amplify } from "aws-amplify";
+import "@aws-amplify/ui-react/styles.css";
+import { getUrl } from "aws-amplify/storage";
+import { uploadData } from "aws-amplify/storage";
+import { generateClient } from "aws-amplify/data";
+import outputs from "../amplify_outputs.json";
+/**
+ * @type {import('aws-amplify/data').Client<import('../amplify/data/resource').Schema>}
+ */
 
-function App() {
+Amplify.configure(outputs);
+const client = generateClient({
+  authMode: "userPool",
+});
+
+export default function App() {
   const [notes, setNotes] = useState([]);
-  const [input, setInput] = useState('');
-  const [editingIndex, setEditingIndex] = useState(null);
 
-  // Load notes from localStorage on mount
   useEffect(() => {
-    const saved = localStorage.getItem('notes');
-    if (saved) setNotes(JSON.parse(saved));
+    fetchNotes();
   }, []);
 
-  // Save notes to localStorage whenever notes change
-  useEffect(() => {
-    localStorage.setItem('notes', JSON.stringify(notes));
-  }, [notes]);
+  async function fetchNotes() {
+    const { data: notes } = await client.models.Note.list();
+    await Promise.all(
+      notes.map(async (note) => {
+        if (note.image) {
+          const linkToStorageFile = await getUrl({
+            path: ({ identityId }) => `media/${identityId}/${note.image}`,
+          });
+          console.log(linkToStorageFile.url);
+          note.image = linkToStorageFile.url;
+        }
+        return note;
+      })
+    );
+    console.log(notes);
+    setNotes(notes);
+  }
 
-  const handleAddOrEdit = () => {
-    if (input.trim()) {
-      if (editingIndex !== null) {
-        // Edit mode
-        const updated = [...notes];
-        updated[editingIndex] = input;
-        setNotes(updated);
-        setEditingIndex(null);
-      } else {
-        // Add mode
-        setNotes([...notes, input]);
-      }
-      setInput('');
-    }
-  };
+  async function createNote(event) {
+    event.preventDefault();
+    const form = new FormData(event.target);
+    console.log(form.get("image").name);
 
-  const handleEdit = (idx) => {
-    setInput(notes[idx]);
-    setEditingIndex(idx);
-  };
+    const { data: newNote } = await client.models.Note.create({
+      name: form.get("name"),
+      description: form.get("description"),
+      image: form.get("image").name,
+    });
 
-  const handleDelete = (idx) => {
-    setNotes(notes.filter((_, i) => i !== idx));
-    // If deleting the note being edited, reset edit mode
-    if (editingIndex === idx) {
-      setInput('');
-      setEditingIndex(null);
-    }
-  };
+    console.log(newNote);
+    if (newNote.image)
+      if (newNote.image)
+        await uploadData({
+          path: ({ identityId }) => `media/${identityId}/${newNote.image}`,
+
+          data: form.get("image"),
+        }).result;
+
+    fetchNotes();
+    event.target.reset();
+  }
+
+  async function deleteNote({ id }) {
+    const toBeDeletedNote = {
+      id: id,
+    };
+
+    const { data: deletedNote } = await client.models.Note.delete(
+      toBeDeletedNote
+    );
+    console.log(deletedNote);
+
+    fetchNotes();
+  }
 
   return (
-    <div style={{
-      maxWidth: 500,
-      margin: '3rem auto',
-      padding: 24,
-      border: '1px solid #ddd',
-      borderRadius: 12,
-      fontFamily: 'system-ui'
-    }}>
-      <h1 style={{textAlign: 'center'}}>📝 Notes App</h1>
-      <div style={{display: 'flex', gap: 8, marginBottom: 16}}>
-        <input
-          value={input}
-          onChange={e => setInput(e.target.value)}
-          placeholder="Type your note..."
-          style={{
-            flex: 1,
-            padding: 8,
-            border: '1px solid #ccc',
-            borderRadius: 6
-          }}
-          onKeyDown={e => { if (e.key === 'Enter') handleAddOrEdit(); }}
-        />
-        <button
-          onClick={handleAddOrEdit}
-          style={{
-            padding: '8px 16px',
-            border: 'none',
-            borderRadius: 6,
-            background: '#1976d2',
-            color: 'white',
-            cursor: 'pointer'
-          }}
+    <Authenticator>
+      {({ signOut }) => (
+        <Flex
+          className="App"
+          justifyContent="center"
+          alignItems="center"
+          direction="column"
+          width="70%"
+          margin="0 auto"
         >
-          {editingIndex !== null ? 'Update' : 'Add'}
-        </button>
-      </div>
-      <ul style={{listStyle: 'none', padding: 0}}>
-        {notes.length === 0 && (
-          <li style={{color: '#888', textAlign: 'center'}}>No notes yet.</li>
-        )}
-        {notes.map((note, idx) => (
-          <li key={idx} style={{
-            background: '#f9f9f9',
-            marginBottom: 8,
-            padding: 12,
-            borderRadius: 6,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between'
-          }}>
-            <span style={{flex: 1, marginRight: 10}}>{note}</span>
-            <button
-              onClick={() => handleEdit(idx)}
-              style={{
-                marginRight: 6,
-                padding: '4px 10px',
-                border: 'none',
-                borderRadius: 4,
-                background: '#ffc107',
-                color: '#333',
-                cursor: 'pointer'
-              }}
-            >Edit</button>
-            <button
-              onClick={() => handleDelete(idx)}
-              style={{
-                padding: '4px 10px',
-                border: 'none',
-                borderRadius: 4,
-                background: '#e53935',
-                color: 'white',
-                cursor: 'pointer'
-              }}
-            >Delete</button>
-          </li>
-        ))}
-      </ul>
-    </div>
+          <Heading level={1}>My Notes App</Heading>
+          <View as="form" margin="3rem 0" onSubmit={createNote}>
+            <Flex
+              direction="column"
+              justifyContent="center"
+              gap="2rem"
+              padding="2rem"
+            >
+              <TextField
+                name="name"
+                placeholder="Note Name"
+                label="Note Name"
+                labelHidden
+                variation="quiet"
+                required
+              />
+              <TextField
+                name="description"
+                placeholder="Note Description"
+                label="Note Description"
+                labelHidden
+                variation="quiet"
+                required
+              />
+              <View
+                name="image"
+                as="input"
+                type="file"
+                alignSelf={"end"}
+                accept="image/png, image/jpeg"
+              />
+
+              <Button type="submit" variation="primary">
+                Create Note
+              </Button>
+            </Flex>
+          </View>
+          <Divider />
+          <Heading level={2}>Current Notes</Heading>
+          <Grid
+            margin="3rem 0"
+            autoFlow="column"
+            justifyContent="center"
+            gap="2rem"
+            alignContent="center"
+          >
+            {notes.map((note) => (
+              <Flex
+                key={note.id || note.name}
+                direction="column"
+                justifyContent="center"
+                alignItems="center"
+                gap="2rem"
+                border="1px solid #ccc"
+                padding="2rem"
+                borderRadius="5%"
+                className="box"
+              >
+                <View>
+                  <Heading level="3">{note.name}</Heading>
+                </View>
+                <Text fontStyle="italic">{note.description}</Text>
+                {note.image && (
+                  <Image
+                    src={note.image}
+                    alt={`visual aid for ${notes.name}`}
+                    style={{ width: 400 }}
+                  />
+                )}
+                <Button
+                  variation="destructive"
+                  onClick={() => deleteNote(note)}
+                >
+                  Delete note
+                </Button>
+              </Flex>
+            ))}
+          </Grid>
+          <Button onClick={signOut}>Sign Out</Button>
+        </Flex>
+      )}
+    </Authenticator>
   );
 }
-
-export default App;
